@@ -1,92 +1,95 @@
-import numpy as np
-from PIL import Image
-import matplotlib.pyplot as plt
+
+# Demo RLC với giao diện tkinter
+import tkinter as tk
+from tkinter import filedialog, messagebox
+from PIL import Image, ImageTk
 import os
+from rlc_logic import open_and_prepare_image, rle_encode, rle_decode, get_compression_info
 
-# ===============================
-# ẢNH ĐẦU VÀO
-# ===============================
-INPUT_FILENAME = "cameraman.tif"   # tên file ảnh thật
-OUTPUT_DIR = "rlc_output"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+class RLCApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Demo Nén Ảnh RLC với Tkinter")
+        self.root.geometry("1000x600")
+        self.root.resizable(False, False)
 
-# --- 1. Đọc ảnh thật ---
-img = Image.open(INPUT_FILENAME).convert("L")  # "L" = ảnh xám (0..255)
-image = np.array(img, dtype=np.uint8)
+        self.img_path = None
+        self.img_goc = None
+        self.img_gray = None
+        self.img_bw = None
+        self.img_decoded = None
+        self.encoded = None
 
-# --- 2. (Tùy chọn) Giảm kích thước ảnh cho nhanh ---
-# (bạn có thể tắt nếu muốn ảnh gốc)
-img_small = img.resize((256, 256), Image.BILINEAR)
-image = np.array(img_small, dtype=np.uint8)
+        # Frames
+        self.frame_top = tk.Frame(root)
+        self.frame_top.pack(pady=10)
+        self.frame_mid = tk.Frame(root)
+        self.frame_mid.pack()
+        self.frame_info = tk.Frame(root)
+        self.frame_info.pack(pady=10)
 
-# --- 3. (Tùy chọn) Chuyển ảnh sang đen trắng 0/255 (để RLC hiệu quả hơn) ---
-THRESHOLD = 128
-image_bw = np.where(image >= THRESHOLD, 255, 0).astype(np.uint8)
+        # Nút tải ảnh
+        self.btn_load = tk.Button(self.frame_top, text="Tải ảnh", command=self.load_image, font=("Arial", 12))
+        self.btn_load.pack()
 
-# Lưu ảnh sau khi xử lý đầu vào
-Image.fromarray(image_bw).save(os.path.join(OUTPUT_DIR, "prepared_image.png"))
+        # Canvas hiển thị ảnh
+        self.canvas_goc = tk.Canvas(self.frame_mid, width=256, height=256, bg="white")
+        self.canvas_goc.grid(row=0, column=0, padx=10)
+        self.canvas_bw = tk.Canvas(self.frame_mid, width=256, height=256, bg="white")
+        self.canvas_bw.grid(row=0, column=1, padx=10)
+        self.canvas_decoded = tk.Canvas(self.frame_mid, width=256, height=256, bg="white")
+        self.canvas_decoded.grid(row=0, column=2, padx=10)
 
-# --- 4. Hiển thị ảnh ban đầu ---
-plt.imshow(image_bw, cmap='gray', vmin=0, vmax=255)
-plt.title("Ảnh Cameraman (đen trắng)")
-plt.axis('off')
-plt.show()
+        tk.Label(self.frame_mid, text="Ảnh gốc", font=("Arial", 11)).grid(row=1, column=0)
+        tk.Label(self.frame_mid, text="Ảnh nén (đen trắng)", font=("Arial", 11)).grid(row=1, column=1)
+        tk.Label(self.frame_mid, text="Ảnh giải mã", font=("Arial", 11)).grid(row=1, column=2)
 
-# --- 5. Hàm mã hóa Run-Length Coding ---
-def rle_encode(img_array):
-    flat = img_array.flatten()
-    encoded = []
-    if flat.size == 0:
-        return encoded
-    count = 1
-    prev = flat[0]
-    for val in flat[1:]:
-        if val == prev:
-            count += 1
-        else:
-            encoded.append((int(prev), int(count)))
-            prev = val
-            count = 1
-    encoded.append((int(prev), int(count)))
-    return encoded
+        # Thông tin nén
+        self.info_text = tk.Text(self.frame_info, width=90, height=8, font=("Consolas", 11))
+        self.info_text.pack()
+        self.info_text.config(state=tk.DISABLED)
 
-# --- 6. Hàm giải mã ---
-def rle_decode(encoded_list, shape):
-    flat = []
-    for value, count in encoded_list:
-        flat.extend([value] * count)
-    return np.array(flat, dtype=np.uint8).reshape(shape)
+    def load_image(self):
+        filetypes = [("Image files", "*.png;*.jpg;*.jpeg;*.bmp;*.tif;*.tiff")]
+        path = filedialog.askopenfilename(title="Chọn ảnh để nén", filetypes=filetypes)
+        if not path:
+            return
+        self.img_path = path
+        try:
+            img, arr_bw, img_bw = open_and_prepare_image(path)
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Không mở được ảnh: {e}")
+            return
+        self.img_goc = img
+        self.img_bw = img_bw
+        self.encoded = rle_encode(arr_bw)
+        arr_decoded = rle_decode(self.encoded, arr_bw.shape)
+        self.img_decoded = Image.fromarray(arr_decoded)
+        self.show_images()
+        self.show_info(arr_bw)
 
-# --- 7. Thực hiện mã hóa và giải mã ---
-encoded = rle_encode(image_bw)
-decoded = rle_decode(encoded, image_bw.shape)
+    def show_images(self):
+        # Ảnh gốc
+        img_goc_tk = ImageTk.PhotoImage(self.img_goc)
+        self.canvas_goc.img = img_goc_tk
+        self.canvas_goc.create_image(0, 0, anchor=tk.NW, image=img_goc_tk)
+        # Ảnh nén (đen trắng)
+        img_bw_tk = ImageTk.PhotoImage(self.img_bw)
+        self.canvas_bw.img = img_bw_tk
+        self.canvas_bw.create_image(0, 0, anchor=tk.NW, image=img_bw_tk)
+        # Ảnh giải mã
+        img_decoded_tk = ImageTk.PhotoImage(self.img_decoded)
+        self.canvas_decoded.img = img_decoded_tk
+        self.canvas_decoded.create_image(0, 0, anchor=tk.NW, image=img_decoded_tk)
 
-# --- 8. Hiển thị ảnh sau khi giải mã ---
-plt.imshow(decoded, cmap='gray', vmin=0, vmax=255)
-plt.title("Ảnh sau khi giải mã RLC (giống ảnh gốc)")
-plt.axis('off')
-plt.show()
+    def show_info(self, arr_bw):
+        info = get_compression_info(arr_bw, self.encoded, self.img_path)
+        self.info_text.config(state=tk.NORMAL)
+        self.info_text.delete(1.0, tk.END)
+        self.info_text.insert(tk.END, info)
+        self.info_text.config(state=tk.DISABLED)
 
-# --- 9. Lưu ảnh giải mã ---
-decoded_path = os.path.join(OUTPUT_DIR, "decoded_image.png")
-Image.fromarray(decoded).save(decoded_path)
-
-# --- 10. Lưu dữ liệu RLE ra file văn bản ---
-rle_txt = os.path.join(OUTPUT_DIR, "encoded_rle.txt")
-with open(rle_txt, "w") as f:
-    for val, cnt in encoded:
-        f.write(f"{val},{cnt}\n")
-
-# --- 11. Thống kê ---
-total_pixels = image_bw.size
-num_runs = len(encoded)
-compression_ratio = round(num_runs * 2 / total_pixels, 4)
-
-print("Ảnh đầu vào:", INPUT_FILENAME)
-print("Kích thước ảnh:", image_bw.shape)
-print("Tổng số pixel:", total_pixels)
-print("Số run sau khi RLC:", num_runs)
-print("Tỉ lệ nén (≈ RLE/Raw):", compression_ratio)
-print("Ảnh đen trắng lưu tại:", os.path.join(OUTPUT_DIR, "prepared_image.png"))
-print("Ảnh giải mã lưu tại:", decoded_path)
-print("File RLE lưu tại:", rle_txt)
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = RLCApp(root)
+    root.mainloop()
